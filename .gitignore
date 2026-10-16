@@ -1,0 +1,21 @@
+# Secrets and local config
+.env
+*.key
+
+# Assessment data: never submitted
+data/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# Local tooling
+.idea/
+.vscode/
+
+# Databases and vector indexes (never submitted)
+*.db
+*.faiss

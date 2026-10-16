@@ -1,0 +1,816 @@
+VELTRIX PEOPLEOPS ASSISTANT - PROGRESS REPORT
+==============================================
+Project folder : D:\veltrix
+Assessment src : C:\Users\sound\Downloads\veltrix_assessment\veltrix_assessment
+Status         : Phases A-G implemented. 242 passed, 2 skipped (OCR: Tesseract not installed).
+                 Docker, live Groq and OCR of the memo are NOT VERIFIED. See section 10.
+Report date    : 2026-10-14 (system date)
+
+
+1. WHAT HAS BEEN DONE
+---------------------
+
+1.1 Audit (completed before any code was written)
+- D:\veltrix was empty: no code, no tests, no Docker files, not a git repo.
+- Read TASK.pdf completely (9 pages). Extracted all mandatory requirements.
+- Inspected manifest.json (30 entries) and corpus/ (30 files; names match corpus.zip,
+  contents not byte-diffed).
+- Inspected veltrix.db read-only:
+    * 36 employees: IN 14, US 11, DE 11
+    * roles: 4 hr (E1001-E1004), 9 manager, 23 employee
+    * 72 leave_balances rows (36 employees x annual + sick)
+    * 26 leave_requests rows (approved / pending / cancelled)
+    * schema matches TASK.pdf section 2.3
+- Environment checked: Python 3.11.9 present; Docker NOT installed; Tesseract NOT installed;
+  make NOT installed; no LLM API key set (OPENAI / ANTHROPIC / GOOGLE all unset).
+- Corpus findings:
+    * memo_hybrid_work_update.pdf has NO text layer -> needs OCR (the scanned document).
+    * All other PDFs have text layers.
+    * Conflicts identified for precedence rules: sick leave (10/12/30 days),
+      medical certificate threshold (2/3 days, DE from day 4), annual carry-forward
+      (10 / 15 IN / 5 US / 10 DE), annual accrual (schedule vs DE addendum 30 days),
+      parental leave (FAQ 16 wks vs v2 20 wks), bereavement (FAQ 3 vs v2 5 days).
+    * Holiday calendars: IN 2025 + 2026 (public + restricted lists, restricted are NOT
+      office closures), US 2026 (observed dates), DE 2026 (includes 2 company holidays).
+    * Access-level documents: manager_handbook.pdf (managers), compensation_bands_2026.pdf
+      and performance_improvement_guidelines.docx (hr).
+    * PROMPT INJECTION found in new_joiner_tips.html (WIKI-NEW-JOINERS, all access):
+      text addressed to an "AI assistant" asking it to reveal the manager's salary band and
+      email. NOT followed. Must be filtered and never treated as an instruction.
+
+1.2 Phase A - project skeleton and dependencies (completed)
+Files created:
+  requirements.txt       pinned runtime + test dependencies
+  app/config.py          settings from environment variables only; APP_TODAY validation
+  .env.example           every variable, no real keys, LLM_PROVIDER defaults to mock
+  .gitignore             excludes .env, data/, caches
+  .dockerignore          excludes .env, data/, caches
+  Dockerfile             python:3.11-slim, tesseract-ocr, CPU torch, model caches baked
+                         in at build, non-root user, port 8000
+  docker-compose.yml     mounts ./data -> /data, optional .env, /health healthcheck
+  Makefile               test / run / ingest targets
+  scripts/test.ps1       Windows equivalent of `make test`
+  pytest.ini             pytest configuration
+  app/__init__.py and subpackage __init__.py files:
+      app/ingestion, app/retrieval, app/llm, app/tools, app/db,
+      app/policy, app/security, app/api
+  tests/__init__.py
+  tests/test_config.py   5 tests for config defaults, API key default, APP_TODAY, overrides
+
+Data copied (development only; excluded from submission):
+  data/veltrix.db              working copy
+  data/veltrix.original.db     preserved original, set READ-ONLY
+  data/manifest.json
+  data/corpus/                 30 files
+  Hash check: source, working copy and original all have SHA-256
+  A2D151A58038E98E0B5DFA1FD4A906DC359E26C43D16B20CAD4EC3E64408C4B5
+
+Packages installed locally:
+  pymupdf 1.24.10 and pytesseract 0.3.13 (installed to verify the pins).
+  All other pins were already installed; `pip install --dry-run -r requirements.txt`
+  resolved successfully.
+
+1.3 Tests actually executed
+  Command : powershell -ExecutionPolicy Bypass -File scripts\test.ps1
+  Result  : 5 passed in 0.07s  (tests/test_config.py)
+  Warnings: pytest-asyncio loop-scope deprecation warning (not from project code).
+
+
+2. WHAT HAS NOT BEEN DONE
+-------------------------
+- No ingestion code. No OCR code. No vector store. No embedding code.
+- No eligibility filtering or precedence logic.
+- No SQLite data access layer. No tools (get_leave_balance, list_leave_requests,
+  get_team_leave, apply_leave, cancel_leave).
+- No access-control or PII-masking code. No prompt-injection defence code.
+- No FastAPI application (app/main.py does not exist yet; Dockerfile and Makefile
+  reference it).
+- No LLM provider code. No mock LLM. No tiktoken token counting.
+- No tests beyond config.
+- No README.md, DESIGN.md.
+- Docker image NOT built. docker compose NOT run. /health NOT verified.
+
+
+3. BLOCKERS AND OPEN ISSUES
+---------------------------
+B1. Tesseract OCR is NOT installed on this Windows machine.
+    - winget install UB-Mannheim.TesseractOCR was started and CANCELLED at the
+      Windows elevation (UAC) prompt.
+    - Needed for: scanned memo OCR (memo_hybrid_work_update.pdf).
+    - Action: install manually from https://github.com/UB-Mannheim/tesseract/wiki
+      (run installer as administrator), or approve a retry. If not on PATH, set
+      TESSERACT_CMD in .env.
+    - Until installed: OCR must raise a clear error; the OCR test must be skipped
+      with the reason stated.
+
+B2. Docker is NOT installed. The user will install Docker Desktop.
+    - Dockerfile and docker-compose.yml are NOT verified.
+    - Unverified pin: torch==2.4.1 from https://download.pytorch.org/whl/cpu.
+    - Must not claim Docker tests passed until `docker compose up` is actually run.
+
+B3. No LLM API key is configured.
+    - Live LLM answers cannot be tested yet.
+    - Deterministic unit tests and a MockLLM will be used for testing.
+
+B4. Groq model ID is NOT verified.
+    - GROQ_MODEL is blank in .env.example on purpose.
+    - Must be confirmed against Groq's current model list before any live call.
+
+B5. Groq provider interpretation.
+    - The user's message said "use groq-", which looks truncated.
+    - Interpreted as: implement Groq as the live provider, behind a pluggable
+      provider interface. Please confirm.
+
+B6. sentence-transformers / torch size.
+    - Local embedding model: sentence-transformers/all-MiniLM-L6-v2 (CPU).
+    - Pulls torch; the Docker image will be large. Model is cached at build time.
+    - Not yet downloaded or tested locally.
+
+
+4. DECISIONS MADE (from user instructions and this session)
+-----------------------------------------------------------
+D1. Provider: pluggable LLM interface; Groq as live provider; MockLLM for tests.
+    Live integration kept separate from business rules.
+D2. OCR: PyMuPDF renders pages, Tesseract reads them. Works inside Docker.
+    Detect missing text layer automatically. No hardcoded corpus facts.
+D3. Docker: port 8000, ./data mounted, ingestion must finish before /health = 200.
+D4. Database: never change or drop existing tables/columns. Leave operations use
+    transactions. Development uses a copy; the original is preserved read-only.
+D5. Tests run against a copy of the supplied database. APP_TODAY used for
+    deterministic dates.
+D6. Company holidays (Germany 24 Dec, 31 Dec) are treated as holidays for leave
+    working-day calculation. Recorded as an assumption for README.
+D7. Restricted holidays (India) are NOT public holidays and are not excluded
+    from working days.
+D8. Work is done in phases A to I. Report after each phase.
+
+
+5. HOW TO RUN WHAT EXISTS NOW (Windows PowerShell)
+--------------------------------------------------
+  cd D:\veltrix
+  python -m pip install -r requirements.txt
+  powershell -ExecutionPolicy Bypass -File scripts\test.ps1
+
+  Note: the service itself does not exist yet, so the app cannot be started.
+
+
+6. NEXT STEPS (in order)
+------------------------
+Phase B - Ingestion, OCR, metadata, local vector store
+  - Parsers for PDF, DOCX, Markdown, HTML (tables preserved)
+  - OCR fallback for PDFs with no text layer (PyMuPDF + Tesseract)
+  - manifest.json metadata loading
+  - Chunking with section headings and page numbers (for citations)
+  - Local embeddings + FAISS index saved to VECTOR_DIR
+  - Holiday dates extracted automatically into a table (no hand-typed facts)
+  - Tests: parsing, OCR on memo_hybrid_work_update.pdf (skipped with reason if
+    Tesseract missing), table extraction
+
+Phase C - Eligibility filtering and precedence (deterministic)
+Phase D - SQLite data access and the five tools
+Phase E - Access control, PII masking, prompt-injection protection
+Phase F - FastAPI /chat, /health, session ownership; Groq provider after
+          verifying the model ID
+Phase G - Two-step confirmation for apply_leave / cancel_leave
+Phase H - Unit, security and integration tests
+Phase I - Docker verification, Makefile, README.md, DESIGN.md
+
+
+7. ASSUMPTIONS SO FAR (to be copied into README.md)
+---------------------------------------------------
+- "use groq-" is read as Groq as the live LLM provider.
+- Company holidays in the German calendar count as holidays for leave.
+- Restricted holidays do not count as holidays and do not reduce balances.
+- Corpus facts are never hardcoded; they come from ingestion.
+- Personal data (names, emails, phones) is never written to logs.
+
+
+8. PHASE B - DOCUMENT INGESTION AND RETRIEVAL (completed; OCR not run)
+======================================================================
+
+8.1 Files created in Phase B
+  app/__init__.py                 Windows-only KMP_DUPLICATE_LIB_OK workaround (see 8.4)
+  app/tokens.py                   tiktoken cl100k_base counting
+  app/ingestion/errors.py         IngestionError, ManifestError, OCRUnavailableError
+  app/ingestion/models.py         ManifestEntry, Segment, ParsedDocument, Chunk
+  app/ingestion/manifest.py       manifest.json loading and validation
+  app/ingestion/ocr.py            scanned-page detection, Tesseract check, OCR
+  app/ingestion/parsers.py        PDF (native + scanned), DOCX, Markdown, HTML
+  app/ingestion/chunking.py       section-aware chunking, token budget 200
+  app/ingestion/holidays.py       holiday extraction from calendar tables
+  app/ingestion/store.py          ingest.db: documents, holidays, meta (transactional)
+  app/ingestion/pipeline.py       run_ingestion(): end-to-end
+  app/ingestion/cli.py            python -m app.ingestion.cli [--force]
+  app/retrieval/embeddings.py     SentenceTransformer embedder (CPU, lazy load)
+  app/retrieval/vector_index.py   FAISS IndexFlatIP, chunks.jsonl, fingerprint, load_or_build
+  tests/helpers.py                HashingEmbedder (test double), paths, tesseract check
+  tests/conftest.py               corpus fixture and tmp-only settings
+  tests/test_manifest.py          12 tests
+  tests/test_parsers.py           12 tests (1 skipped: OCR)
+  tests/test_chunking.py          7 tests
+  tests/test_holidays.py          9 tests
+  tests/test_vector_index.py      8 tests
+  tests/test_pipeline.py          9 tests (1 skipped: OCR)
+
+  Modified: none of the Phase A files except PROGRESS.txt and the Phase A test/config files
+  (unchanged). ingest.db and the FAISS index are written under VECTOR_DIR (default data/index),
+  never into veltrix.db.
+
+8.2 Tests actually executed
+  Command: python -m pytest -p no:warnings -rs
+  Result : 60 passed, 2 skipped, 0 failed (25 s)
+  Skipped: test_parsers.py::test_scanned_memo_is_read_with_ocr        (Tesseract not installed)
+           test_pipeline.py::test_full_corpus_including_scanned_memo  (Tesseract not installed)
+  Per file (run separately earlier, before the last fix):
+    test_config 5 passed, test_manifest 12 passed, test_holidays 9 passed,
+    test_chunking 7 passed, test_parsers 11 passed + 1 skipped (after fixing one wrong test
+    assertion, see 8.4 P2), test_pipeline 8 passed + 1 skipped, test_vector_index 8 passed.
+    Sum: 5 + 12 + 9 + 7 + 11 + 8 + 8 = 60 passed. Matches the full-suite run.
+
+8.3 OCR test status
+  - Scanned-page DETECTION works without Tesseract: memo_hybrid_work_update.pdf -> page [1];
+    leave_policy_global_v2.pdf -> no scanned pages. (test_parsers, passing)
+  - Missing-Tesseract error: raised with install instructions and TESSERACT_CMD hint.
+    (test_parsers, passing; also verified by running the real CLI: exit code 1, message shown,
+    no ingest.db or index written.)
+  - OCR TEXT EXTRACTION FROM THE MEMO: NOT RUN. Tesseract is not installed. The test
+    test_scanned_memo_is_read_with_ocr is skipped, not passed. Do not count it as verified.
+  - The winget install of Tesseract was cancelled earlier at the admin prompt. Install it
+    manually, then re-run the tests.
+
+8.4 Problems found and fixed during Phase B
+  P1. Windows OpenMP crash. faiss-cpu (libomp140) and torch (libiomp5md) both load an OpenMP
+      runtime. The first faiss search after torch loads aborted the process ("OMP Error #15").
+      Fix: app/__init__.py sets KMP_DUPLICATE_LIB_OK=TRUE on Windows only (Intel's documented
+      workaround, flagged as unsafe in general). Mitigation: test_faiss_results_match_brute_force
+      _numpy_search checks FAISS scores against numpy. Linux/Docker does not need this flag.
+      Not verified in Docker yet.
+  P2. A test assumed one column count across both Markdown tables in it_security_policy.md.
+      The parser was right; the test was wrong. Test corrected to check each table separately.
+  P3. executescript() commits any open transaction, which would have broken the atomic store
+      write. Replaced with one execute() per statement inside BEGIN/COMMIT.
+  P4. A faiss tie-order test compared chunk ids. Tied scores can come back in any order.
+      Test now compares scores.
+
+8.5 Corpus results (from actual runs, parsing only)
+  Holiday counts, read by hand from the calendars and matched by the extractor:
+    CAL-HOL-IN-2026: public 12, restricted 7      (restricted are not closures; not public)
+    CAL-HOL-IN-2025: public 12
+    CAL-HOL-US-2026: public 10
+    CAL-HOL-DE-2026: public 10, company 2 (24 Dec, 31 Dec)
+  Every holiday row whose weekday column is present agrees with its date.
+  All 29 non-scanned manifest entries parse; chunks stay within 200 cl100k tokens.
+
+8.6 Confirmations
+  - Corpus facts are NOT hardcoded in code. Holiday dates come from parsing the calendar
+    tables. The expected counts in tests/test_holidays.py are test oracles, counted by hand
+    from the PDFs, and are used only to check the extractor. They are not used by the app.
+  - The ingestion path has no document-specific branches. It works from manifest metadata
+    and the file format.
+  - Original database: SHA-256 unchanged (A2D151A5...C4B5). test_pipeline.py checks this on
+    every run. Ingestion never opens veltrix.db.
+  - data/ is excluded from the submission (.gitignore and .dockerignore).
+
+8.7 Unresolved issues and limitations
+  U1. OCR text quality is unverified (see 8.3).
+  U2. Docker not run. The Dockerfile's torch==2.4.1 CPU pin and the model cache step are
+      unverified.
+  U3. Embedding model is CPU sentence-transformers all-MiniLM-L6-v2; loaded in the test run
+      from the local Hugging Face cache. The first run on a fresh machine needs network.
+  U4. Holiday category rule: "restricted" comes from heading or name; "company" from the name.
+      Other wording would fall back to "public". Checked only on the supplied calendars.
+  U5. PDF headings are detected by numbering pattern (e.g. "6. Title"). Documents with
+      unnumbered headings would have no heading, so their locator falls back to the page.
+  U6. The FAISS search scores every chunk and then filters (correct for a small corpus; not
+      for 10,000 documents; DESIGN.md must say so).
+  U7. Live policy precedence and eligibility are not applied yet (Phase C).
+
+8.8 Next phase
+  Phase C - eligibility filtering and document precedence (deterministic, no LLM).
+
+
+9. PHASE C - DOCUMENT ELIGIBILITY AND PRECEDENCE (completed; stopped for review)
+================================================================================
+
+9.1 Repository state verified before starting
+  - 60 passed, 2 skipped (Phase B), same as PROGRESS.txt section 8.2.
+
+9.2 Files created in Phase C
+  app/db/employees.py              get_requester(): read-only lookup of role and region from
+                                   veltrix.db; returns None for unknown or blank IDs
+  app/policy/models.py             Requester, DocMeta, Candidate, Resolution, Status,
+                                   UpcomingChange
+  app/policy/access.py             ROLE_READABLE_ACCESS (TASK.pdf 3.1); unknown role reads nothing
+  app/policy/eligibility.py        is_readable, region_applies, is_in_effect, is_eligible,
+                                   reference_date
+  app/policy/precedence.py         authority_rank, narrow, resolve, upcoming_changes
+  app/policy/filtering.py          EligibleChunk (cannot be built by hand), filter_eligible_chunks,
+                                   chunk_allowed (predicate for vector search)
+  app/llm/context.py               build_context(): accepts only EligibleChunk, 3,000-token budget
+  tests/test_access_and_requester.py  16 tests
+  tests/test_precedence.py            18 tests (synthetic, includes the TASK.pdf 5.2 worked example)
+  tests/test_corpus_precedence.py     12 tests (manifest metadata + hand-read oracle values)
+  tests/test_filtering_security.py    13 tests (restricted chunks, vector search, budget, metadata edits)
+
+  Modified: none of the Phase A or B source files. The ingestion code, store and index are unchanged.
+
+9.3 Tests actually executed
+  Command: python -m pytest -p no:warnings -rs
+  Result : 119 passed, 2 skipped, 0 failed (29 s)
+  New in Phase C: 59 passed (16 + 18 + 12 + 13). 60 from Phases A and B still pass.
+  Skipped : the two Tesseract OCR tests (not installed).
+  Per file: test_access_and_requester 16, test_precedence 18, test_corpus_precedence 12,
+            test_filtering_security 13.
+
+9.4 Precedence rules as implemented
+  Eligible = readable by role AND region matches (or GLOBAL) AND effective_date <= reference.
+  Tests run in order (TASK.pdf 5.1), and the value decides as soon as one value remains:
+    1. authority (policy, addendum, memo, handbook, calendar > faq, wiki, unknown)
+    2. scope (region-specific > GLOBAL)
+    3. recency (later effective_date)
+  All three tests still run, so an agreeing but overridden document is not cited.
+  If more than one distinct value remains: CONFLICT, both values and their documents returned,
+  nothing picked.
+  Upcoming change: a readable, region-applicable document effective after the reference date,
+  which would win on its effective date and gives a different value from the current answer.
+  Documents that would not win (e.g. v3 under a DE addendum) are not mentioned.
+  No eligible document: NO_ANSWER.
+
+9.5 Security checks in place
+  - Role and region come only from veltrix.db (get_requester). Nothing in a message is read.
+  - Restricted chunks are removed before the vector index returns results (chunk_allowed as
+    the search predicate) AND again before LLM context construction (filter_eligible_chunks).
+  - build_context() raises TypeError for any object that is not an EligibleChunk.
+  - Restricted documents also do not affect resolution, so they cannot change a visible answer.
+  - Lookups use a read-only SQLite URI. A test confirms a write through it fails.
+
+9.6 Corpus results (oracle values read by hand from the documents; the app never reads them)
+  Sick leave: IN -> 12 (v2 + summary, by recency); DE -> 30 (DE addendum, by scope);
+              US -> 12; IN on 2025-08-01 -> 10 (v1 only); IN on 2026-03-31 -> 10 (v2 not yet effective)
+  Medical certificate: IN -> 3 consecutive days (v2 beats FAQ on authority); DE -> addendum by scope
+  Carry-forward: IN -> 15, US -> 5, DE -> 10 (DE addendum is the only cited document)
+  Accrual 5+ years: IN -> 2.0 with upcoming v3 (2.25 from 2027-01-01);
+                    DE -> 2.5 (addendum) and v3 NOT mentioned
+  Manager handbook: visible to managers only. HR-only band document: NO_ANSWER for employees.
+
+9.7 Confirmations
+  - No corpus facts are hardcoded in the policy code. Precedence uses only doc_type,
+    regions, effective_date and access_level from manifest.json.
+  - Corpus values appear only in tests, and tests compare them with the code's output.
+  - Fixed rules from TASK.pdf (role access table, authority list, precedence order) are in code.
+
+9.8 Problems found during Phase C
+  P1. A document that agreed on value but was overridden was cited as used (carry-forward DE
+      cited the global v2). Fixed: all three tests always run to choose cited documents.
+  P2. A test used a reference date after the memo's effective date, so the expected result was
+      wrong. Test corrected; the code was right.
+
+9.9 LIMITATIONS: READ BEFORE PHASE D
+  L1. "The same rule" is NOT decided by this code. resolve() receives candidates that the caller
+      has already grouped as stating the same rule. Grouping by topic is the hardest part of
+      the assignment and is not built yet. Phase D or F must do it, and it can be wrong.
+  L2. Values are compared as exact normalised strings. "10" and "10 working days" count as a
+      CONFLICT. Phase D must normalise values (number + unit) before calling resolve().
+  L3. The holiday calendars are not yet passed through eligibility to answer working-day
+      questions (Phase D).
+  L4. upcoming_changes() only sees the candidates it is given. Its results are only as complete
+      as the grouping in L1.
+  L5. The NO_ANSWER route is not yet returned by the API (Phase F). resolve() returns the status.
+  L6. Fail-safe defaults: an unknown doc_type ranks lowest, and an unknown role reads nothing.
+
+9.10 Stopped for review
+  (Superseded by section 10: Phases D to G were implemented in a later instruction.)
+
+
+10. PHASES D, E, F, G - IMPLEMENTED
+==================================
+
+10.1 Verified state before starting
+  - 119 passed, 2 skipped (Phase C state). Confirmed before any change.
+
+10.2 Final test result
+  Command : python -m pytest -p no:warnings -q
+  Result  : 242 passed, 2 skipped, 0 failed (77 s)
+  Skipped : test_parsers.py::test_scanned_memo_is_read_with_ocr and
+            test_pipeline.py::test_full_corpus_including_scanned_memo (Tesseract not installed).
+  Collected per file (244 total):
+    test_access_and_requester 16, test_chat_api 66, test_chunking 7, test_config 5,
+    test_corpus_precedence 12, test_filtering_security 13, test_gaps_security_confirmation 11,
+    test_holidays 9, test_leave_tools 45, test_manifest 13, test_parsers 12, test_pipeline 9,
+    test_precedence 18, test_vector_index 8.
+
+10.3 Files added in D-G
+  Phase D (database and tools)
+    app/db/connection.py          read-only and writable SQLite connections
+    app/db/leave_repo.py          parameterised queries and writes (no business rules)
+    app/db/state_repo.py          state.db: sessions, pending proposals, atomic claim
+    app/leave/calendar.py         working days; holidays from ingest.db (public + company)
+    app/leave/service.py          apply/cancel rules; transactions (BEGIN IMMEDIATE, rollback)
+    app/tools/leave_tools.py      the five tools; permission checks inside each tool
+    app/tools/permissions.py      who may view whose leave; fixed refusal text
+  Phase E (security)
+    app/security/pii.py           email masking, phone redaction, log sanitiser
+    app/security/injection.py     manipulation patterns (user) and corpus instruction quarantine
+  Phase F (API, LLM, routing)
+    app/main.py                   FastAPI: POST /chat, GET /health, startup ingestion in background
+    app/api/schemas.py            request and response bodies (TASK section 9)
+    app/chat/router.py            one turn: confirmation, routing, tools, documents
+    app/chat/intent.py            deterministic intent (no LLM)
+    app/chat/dates.py             date phrases (TASK 8.4)
+    app/chat/rag.py               document answers: filter, budget, model, validate, precedence
+    app/chat/models.py            ChatResult; route invariants (TASK 8.1) enforced in code
+    app/chat/services.py          shared services (index, provider, paths)
+    app/llm/provider.py           provider interface, errors, factory
+    app/llm/groq_provider.py      Groq provider (needs GROQ_API_KEY and GROQ_MODEL)
+    app/llm/mock.py               ExtractiveMockProvider (labelled unverified); ScriptedProvider (tests)
+    app/llm/prompts.py            system prompt (no corpus text)
+    app/llm/context.py            build_context: 3,000-token budget, logs corpus tokens
+    app/policy/filtering.py       adds UpcomingChunk and filter_upcoming_chunks
+  Phase G (confirmation)
+    implemented in app/chat/router.py (_apply, _cancel, _confirm) and app/db/state_repo.py
+  Tests
+    tests/test_leave_tools.py (45), tests/test_chat_api.py (66),
+    tests/test_gaps_security_confirmation.py (11)
+  Modified
+    app/config.py (STATE_DB, LLM_TIMEOUT_SECONDS, RAG_TOP_K), app/ingestion/manifest.py
+    (accepts a byte-order mark), app/policy/precedence.py (case-insensitive compare),
+    app/policy/filtering.py, app/llm/context.py, tests/conftest.py, README.md, DESIGN.md,
+    .env.example, docker-compose.yml (STATE_DB)
+
+10.4 Behaviour verified by tests
+  - Identity from the database only; claims in messages change nothing.
+  - Employee, manager (direct reports only), HR (one employee) and bulk-request rules.
+  - Fixed refusal text for unknown and forbidden targets (same text).
+  - apply/cancel rules; working days (weekends, holidays, restricted not public, company closed).
+  - Transactions: rollback on failure; concurrent identical applications: one success.
+  - Two-step confirmation: proposal makes no change; confirm once; second confirm refused;
+    balance drop and new overlap between proposal and confirm are rejected; changed details
+    replace the proposal; unrelated message discards it; expiry after 10 minutes.
+  - Concurrent confirmations claim the proposal once.
+  - Route rules (TASK 8.1) enforced in ChatResult; refusals carry no tool calls.
+  - Restricted documents never reach the model (filter and context type), including through vector
+    search, and "no answer" text does not reveal titles.
+  - Quarantine of corpus text that addresses an AI assistant.
+  - Citations: only chunks in the context; locators from chunk metadata.
+  - 403 for session reuse by another employee; 401 for missing or unknown header; 400 for bad bodies;
+    503 before readiness.
+  - PII: emails and phone numbers not sent to the model or logged; tool output has no names,
+    emails or phones.
+  - Token budget: corpus tokens logged per call and <= 3,000.
+  - Groq: no call without key and model; timeouts and API errors mapped (fake client, no network).
+
+10.5 Live checks (real HTTP server, scratch copy of the database, real MiniLM embeddings,
+     mock provider, scanned memo excluded because Tesseract is missing)
+  - Default configuration (memo included): GET /health -> 503, POST /chat -> 503, and the log
+    reports the Tesseract install requirement.
+  - Balance question -> route tool, get_leave_balance success, 3.5 days.
+  - Apply proposal -> pending_confirmation; "yes" -> success; "yes" again -> clarify (no second write).
+  - Injection text -> refuse, no tool calls. Bulk request -> refuse.
+  - Session used by another employee -> 403. Missing header -> 401. Missing field -> 400.
+  - Policy question with the mock quoted the SUPERSEDED 2025 sick-leave passage (10 days; the current
+    value is 12). Fixed in code: mock answers now carry a visible caveat. The mock is not a policy answerer.
+  - Assessment database: SHA-256 unchanged (A2D151A5...C4B5) for the original, working copy and source.
+
+10.6 Retrieval check with the real embedding model (not a benchmark)
+  - Index: 157 chunks from 29 documents (memo excluded).
+  - 5 of 5 key questions retrieved the expected document in the top 12, with the eligibility filter
+    applied (DE sick leave, IN sick leave, IN carry-forward, IN holidays, DE medical certificate).
+
+10.7 Problems found and fixed in D-G
+  P1. Wrong module used for manipulation detection (caught by tests, fixed).
+  P2. Tests reused one session across two employees (correct 403; test corrected).
+  P3. "How many sick days do I get?" after a proposal was treated as a change to it. Now only a real
+      change (a date, or a leave type with a change word) replaces a proposal.
+  P4. "Make it until Friday instead" was refused instead of clarified. Now clarified.
+  P5. The hashing test embedder ranked the German sick-leave chunk outside the top 12. The top-k is now
+      a setting (RAG_TOP_K); the real model ranks it correctly.
+  P6. Values were lowercased for display. Display keeps case; comparison is case-insensitive.
+  P7. A manifest with a byte-order mark failed to load (found by a live run). The loader accepts it; test added.
+  P8. Mock answers looked like policy answers. They now carry a caveat.
+
+10.8 Checklist (PASS / FAIL / NOT VERIFIED)
+  PASS (tested in this environment):
+    - Identity and role from the database; claims ignored
+    - Employee / manager / HR leave access; direct-report boundary; bulk refusals
+    - Restricted documents excluded before the model and before ranking
+    - apply/cancel business rules and transactions; rollback; concurrency
+    - Two-step confirmation, duplicate and stale-state handling, session isolation
+    - API contract, status codes 400/401/403/503/200, route invariants
+    - Citations from metadata; invalid model citations rejected
+    - Token budget <= 3,000 corpus tokens per call (logged)
+    - PII masking in answers, prompts and logs; tool results contain no names, emails or phones
+    - Working-day calculation; holiday extraction; precedence on synthetic and corpus oracle values
+    - Ingestion, modified corpus and metadata rebuild (Phase B)
+  NOT VERIFIED:
+    - docker compose up and /health = 200 within 10 minutes (Docker not installed)
+    - Live Groq answers (no key; no verified model ID; GROQ_MODEL has no default)
+    - OCR text from memo_hybrid_work_update.pdf (Tesseract not installed)
+    - Answer quality of any live model, including topic grouping for precedence (L1 below)
+    - The 30-second limit under a live model (timeout set to 20 s, not measured)
+    - Retrieval at scale (small sample only)
+    - (verified) scripts\test.ps1 after Phases D-G: 242 passed, 2 skipped, exit 0
+  FAIL: none known in tests. Known defects are listed in 10.9.
+
+10.9 Known limitations and risks
+  L1. Precedence depends on the model grouping rules under the same topic. This is the main accuracy risk.
+  L2. Mock answers quote the first passage; a superseded passage can be quoted (caveated).
+  L3. Confirmation state is per session and per process; state.db is SQLite (single instance).
+  L4. A proposal left in 'executing' (process crash mid-write) would block that session. Not auto-cleared.
+  L5. Leave requests use whole working days from the calendar; fractional balances are kept as stored.
+  L6. Date phrases beyond those in dates.py (e.g. "the day after tomorrow") are asked about, not parsed.
+  L7. Company holidays (German calendar) are treated as closures. This is an assumption.
+  L8. The team-leave answer lists employee IDs (no names). Tools never return names.
+
+10.10 Next steps (for the reviewer)
+  1. Install Tesseract, then re-run the tests: the OCR tests should then run.
+  2. Install Docker Desktop, then run: docker compose up --build; then check http://localhost:8000/health.
+  3. Provide a Groq key and a model ID verified in the Groq console; run a live policy evaluation.
+  4. Evaluate precedence with a live model on the supplied corpus and the modified corpus.
+
+
+11. FINAL VERIFICATION (independent QA pass)
+============================================
+Scope: re-run everything rather than trust section 10. Environment: Windows 11, Python 3.11.9.
+
+11.1 Tests actually run
+  - python -m pytest -p no:warnings -q -rs   -> exit 0 : 242 passed, 2 skipped (88 s and 81 s, two runs)
+  - powershell -File scripts\test.ps1         -> exit 0 : 242 passed, 2 skipped (83 s)
+  - Skipped (Tesseract missing): test_parsers::test_scanned_memo_is_read_with_ocr,
+    test_pipeline::test_full_corpus_including_scanned_memo
+  - One regression was found by this pass: the server never configured logging, so the 3,000-token
+    budget records were not written. Fixed in app/main.py (logging.basicConfig with LOG_LEVEL, sanitiser
+    attached afterwards). The full suite was re-run afterwards: 242 passed, 2 skipped.
+
+11.2 OCR checks
+  - Tesseract: NOT INSTALLED (not on PATH, not at C:\Program Files\Tesseract-OCR).
+  - The two OCR tests were skipped, not run. OCR TEXT EXTRACTION FROM THE MEMO: NOT VERIFIED.
+  - Verified without OCR: scanned-page detection (memo -> page 1; v2 PDF -> none) and the clear
+    install error when TESSERACT_CMD points to a missing file.
+
+11.3 Docker checks
+  - Docker: NOT INSTALLED. docker build, docker compose up, /health 200 after ingestion, port 8000
+    from the container, ./data mount, and container logs: ALL NOT VERIFIED.
+  - Verified locally instead (uvicorn, not Docker): /health 503 before ingestion finishes (first
+    observed 503), 200 after; port 8000 listening; ingestion of 29 documents with real embeddings.
+
+11.4 Live HTTP integration (real uvicorn process, scratch copy of veltrix.db, real MiniLM embeddings,
+     mock LLM, memo excluded). Script kept outside the project; results:
+  PASS  health: first response 503, later 200
+  PASS  identity: missing header 401, unknown employee 401, bad body 400
+  PASS  employee leave balance: tool get_leave_balance success, "3.5 days"
+  PASS  manager reads direct report E2004 (success); manager E2001 reads indirect report (refuse, no tool call)
+  PASS  employee asks for E2005 (refuse, same fixed text, no tool call)
+  PASS  HR reads one employee E4010 (tool success)
+  PASS  team leave: manager gets direct reports (includes E2004); employee refused (no tool call)
+  PASS  apply: proposal pending_confirmation; "yes" -> success; DB balance 10 -> 8
+  PASS  duplicate apply confirmation -> clarify, no tool call, DB unchanged (8)
+  PASS  cancel: proposal for request 864fa3f3...; "yes" -> success; DB balance 3.5 -> 7.5
+  PASS  duplicate cancel confirmation -> clarify, no second restore (7.5)
+  PASS  session ownership: other employee reusing a session -> 403
+  PASS  policy question returns route rag with a citation (see 11.6 for what the citation is)
+  PASS  missing-answer route: question dated 2023 -> no_answer, no citations
+  PASS  prompt injection -> refuse, no tool calls
+  PASS  PII: email and phone in the message are not echoed in the answer
+  PASS  3,000-token limit: one model call logged with corpus_tokens=2236 (<= 3000)
+  PASS  logs: 0 email, 0 phone, 0 names/emails from the employee table; 0 tracebacks
+
+11.5 Security checks
+  PASS  Only one model call site exists: app/chat/rag.py, which receives the output of build_context.
+        build_context accepts only EligibleChunk / UpcomingChunk, created only by the policy filters.
+        Restricted chunks are excluded before the search result is ranked AND before context construction.
+        Tests inspect the prompts actually sent (ScriptedProvider.calls): restricted text absent.
+  PASS  Permission checks run in backend code: leave_tools.get_leave_balance / list_leave_requests /
+        get_team_leave call permissions.can_view_employee / can_view_team before reading data.
+        apply and cancel act only on the authenticated requester (service ownership check).
+        The router also calls the same permission function, but only to decide whether to call a tool.
+  PASS  No names, emails or phones in application logs (checked in the live run and in unit tests).
+        Logs carry employee IDs and hashed session tags.
+  NOTE  Tool results and answers contain no names or emails; team-leave answers list employee IDs.
+
+11.6 Policy accuracy: mechanism and what is proven
+  Mechanism:
+    1. Retrieval: FAISS search over chunks, with predicates that remove unreadable, out-of-region and
+       not-yet-in-effect chunks before ranking (in-effect set), and a separate upcoming set.
+    2. Grouping by topic: the MODEL returns rules {topic, value, chunk_id}. Code normalises the topic
+       (lower-case, punctuation removed) and groups rules with the same normalised topic. This is the
+       weakest link: two documents that word a rule differently are not compared.
+    3. Precedence: app/policy/precedence.py resolve() applies authority, then scope, then recency,
+       stopping when one value remains; differing values -> CONFLICT (both reported, none chosen).
+  Proven by deterministic tests (not model quality):
+    - Contradictory values with a scripted provider: sick leave IN -> 12 (v2 beats FAQ on authority),
+      DE -> 30 (addendum wins on scope), 2025 -> 10 with v2 reported as an upcoming change;
+      accrual IN -> upcoming v3 mentioned, DE -> v3 not mentioned; synthetic conflict -> both reported.
+  NOT proven:
+    - Whether any live model groups topics and extracts values correctly. The mock provider never
+      produces rules, so the mock is NOT evidence of answer quality. In the live run the mock quoted the
+      superseded 2025 sick-leave passage (see 11.7 P1).
+
+11.7 Findings from this pass
+  P1. (Known, caveated) With the default mock provider the policy citation points to the superseded
+      2025 policy. The answer is labelled unverified. Not a model answer. Do not present mock output as
+      policy advice.
+  P2. Fixed: missing logging configuration in the server (see 11.1).
+  P3. Note: the environment variable ANTHROPIC_BASE_URL is set on this machine. The project does not
+      read it. It is not an API key and was not used.
+
+11.8 Groq
+  - GROQ_API_KEY: NOT SET in this environment. No .env file exists.
+  - GROQ_MODEL: NOT SET. No model ID has been verified (a web search found no official current list).
+  - Live-provider testing: NOT VERIFIED. The GroqProvider has only fake-client tests for error mapping.
+
+11.9 Submission files (checked by existence, size and content)
+  PRESENT (non-empty): Dockerfile, docker-compose.yml, requirements.txt, .env.example, .gitignore,
+    .dockerignore, README.md, DESIGN.md, Makefile, scripts/test.ps1, pytest.ini, PROGRESS.txt, 14 test files.
+  PASS  No real API key shapes found in project files (scan for gsk_, sk-, AIza patterns: none).
+  PASS  .gitignore and .dockerignore both exclude data/. data/ is not in the submission scope.
+  PASS  No .env file in the project (only .env.example, with empty key fields).
+  NOTE  data/ still exists on this machine (assessment copies, state.db, index) and must be removed
+        from the zipped submission. It is excluded by the ignore files, not by deletion.
+  PASS  The original assessment database is unchanged: SHA-256 A2D151A58038E98E0B5DFA1FD4A906DC359E26C43D16B20CAD4EC3E64408C4B5
+        for the source, data/veltrix.original.db and the working copy data/veltrix.db.
+
+11.10 Final checklist
+  PASS
+    - Full pytest suite and scripts/test.ps1 (242 passed, 2 skipped, exit 0)
+    - Employee identity from the database; claims ignored (tests and live)
+    - Employee balance; manager direct reports; indirect and other-employee refusals; HR single employee
+    - Team leave: managers only; direct reports only
+    - Apply and cancel proposal, confirmation, duplicate protection, session ownership (live and tests)
+    - Policy question with citations (live: route rag, citation present)
+    - Missing-answer route (live: no_answer)
+    - Prompt-injection refusal; bulk refusal (live)
+    - PII not echoed and not logged (live and tests)
+    - 3,000-token limit (live log 2236 tokens; enforced in code and tests)
+    - Restricted documents filtered before the model (code path and tests)
+    - Permission checks in backend tool code
+    - Submission files present; no API keys in project files
+    - Original assessment database unchanged
+  NOT VERIFIED
+    - OCR text extraction from memo_hybrid_work_update.pdf (Tesseract not installed)
+    - Docker build, docker compose up, /health 200 from the container, port 8000 from the container,
+      ./data mount, container logs (Docker not installed)
+    - Live Groq answers (no GROQ_API_KEY, no verified GROQ_MODEL)
+    - Live model policy accuracy and topic grouping
+    - 30-second request limit under a live model
+  FAIL
+    - None in the executed tests. (Defects found and fixed in this pass are listed in 11.7.)
+
+11.11 Remaining critical risks
+  R1. Policy precedence relies on a model grouping rules by topic. Unverified with a live model.
+      A wrong grouping can produce a confident wrong value. This is the largest risk.
+  R2. The OCR of the scanned memo is unverified. If OCR is wrong, memo content is wrong, and the memo is
+      an upcoming hybrid-work change for IN and US.
+  R3. The container path is unverified. A mounted ./data with Windows permissions could fail for the
+      non-root user (uid 1000). Check when Docker is installed.
+  R4. The mock provider is not a policy answerer. It must not be used for demos of policy answers.
+  R5. The submission zip must exclude data/ and any .env. The ignore files do this for Docker and git,
+      but a manual zip would include them.
+
+
+12. GEMINI, REGRESSION TEST, DOCKER RUNTIME, DOCUMENTATION (this session)
+=========================================================================
+
+12.1 Gemini provider (TASK 10.3 live-provider requirement)
+  Implemented, NOT live-verified.
+  - SDK: google-genai 2.12.0 (PyPI). Verified from the wheel: Client(api_key, http_options),
+    HttpOptions(timeout in MILLISECONDS, retry_options), HttpRetryOptions(attempts),
+    GenerateContentConfig(system_instruction, temperature, max_output_tokens, response_mime_type),
+    models.generate_content(model, contents, config), response.text, errors.APIError (code attribute).
+    SDK reads GOOGLE_API_KEY or GEMINI_API_KEY; the project passes its own key explicitly.
+  - Python 3.10+; works with the project's Python 3.11.
+  - Dependency changes (required by google-genai 2.12.0, tested):
+      pydantic 2.9.2 -> 2.12.5, httpx 0.27.2 -> 0.28.1. Full suite passes after the change.
+  - Files: app/llm/gemini_provider.py (new), app/llm/provider.py (gemini branch; mock and groq
+    unchanged), app/config.py (gemini_api_key from GEMINI_API_KEY, gemini_model from GEMINI_MODEL,
+    no default model), app/main.py (passes gemini settings), requirements.txt, .env.example.
+  - Safety: retries disabled (attempts=1) so the 30-second limit holds; timeouts map to
+    LLMTimeoutError; API errors map to a generic LLMError that includes only the status code;
+    empty or blocked replies are errors. A missing key or model fails startup (/health 503). The
+    service never silently falls back to the mock when Gemini is selected.
+  - Tests: tests/test_gemini_provider.py (13). Fake client; no network; no paid API.
+  - Configuration the user must add to D:\veltrix\.env (never committed):
+      LLM_PROVIDER=gemini
+      GEMINI_API_KEY=<key>
+      GEMINI_MODEL=<model ID verified in Google AI Studio>
+  - Current state: .env exists, LLM_PROVIDER=mock, GEMINI_* not present, so NOT CONFIGURED.
+    No live Gemini request has been made. The model ID has NOT been guessed.
+
+12.2 Memo precedence regression (TASK section 5, precedence)
+  - tests/test_remote_work_precedence.py (6 tests). Facts: POL-REMOTE-WORK (GLOBAL, 2025) says
+    up to 2 days per week; MEMO-HYBRID-2026 (IN and US, effective 2026-07-01, authority memo) says
+    up to 3 days per week for those offices and replaces the 2-day limit there.
+  - Results: IN and US from 2026-07-01 -> 3 days (decided by scope); DE -> 2 days; IN on
+    2026-06-30 -> 2 days; chat-level test returns the memo with its citation.
+  - The chat-level test uses the memo sentence from the OCR output. It does not need Tesseract.
+
+12.3 OCR
+  - Host (Windows): Tesseract NOT installed. OCR tests skipped. NOT VERIFIED on the host.
+  - Inside the Docker container: VERIFIED. The memo is OCR-read (page 1, OCR flag true, 2 chunks).
+    Extracted text: "VELTRIX SYSTEMS / INTERNAL MEMORANDUM ... with effect from 1 July 2026 ... may work from
+    home for up to 3 days per week ... This replaces the limit of 2 days per week in the Remote and
+    Hybrid Work Policy for these offices only ... Berlin ... not affected".
+  - Limitation: the signature line is read as noise ("WWWV0 YO"). Body text is correct.
+
+12.4 Docker runtime
+  - Model-cache warning diagnosis: the embedding model IS cached in the image. An offline load
+    as the app user with the network disabled (--network none, HF_HUB_OFFLINE=1) succeeded.
+    The warning came from the runtime trying to record a commit hash in a root-owned cache folder.
+  - Fix applied: Dockerfile sets HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 AFTER the
+    build-time model download step (so the build can still download). After rebuild, the warning
+    no longer appears and the service starts offline.
+  - Rebuild: docker compose build -> exit 0. Image: veltrix-peopleops:latest. Verified inside image:
+    google-genai 2.12.0, pydantic 2.12.5, httpx 0.28.1, HF_HUB_OFFLINE=1.
+  - Restart: docker compose up -d --force-recreate with the default provider (mock, no key).
+    veltrix-app-1: health 200 (first check after ~5 s; index reused). Logs: service ready
+    documents=30 chunks=159 provider=mock-extractive. No traceback. No Hugging Face warning.
+  - Live API against the container (mock provider): all checks from section 11.4 still pass.
+
+12.5 Tests (actual results)
+  - Host: python -m pytest -p no:warnings -q -rs -> exit 0: 261 passed, 2 skipped (OCR, no Tesseract).
+  - Linux container (rebuilt image, tests and data mounted read-only):
+      python -m pytest -> exit 0: 262 passed, 1 skipped (the skip is the missing-Tesseract path,
+      which is not needed when Tesseract is present; both OCR tests ran and passed).
+  - Earlier host run before the Gemini and precedence work: 242 passed, 2 skipped.
+
+12.6 Documentation
+  - README.md: status, Docker, provider configuration, and limitations updated to verified facts.
+  - DESIGN.md: 1,089 words. Rendered through Edge (A4, 10 pt approximation): 2 pages.
+    This is an approximation, not Word; open in Word to confirm exactly.
+  - Makefile: test and run targets use python -m; make is not installed on this Windows host.
+    scripts/test.ps1 runs the same suite.
+
+12.7 Submission safety
+  - No git repository. Git 2.55 is installed. Commands to prepare (NOT run):
+      git init
+      git add .gitignore .dockerignore Dockerfile docker-compose.yml requirements.txt .env.example
+            README.md DESIGN.md PROGRESS.txt Makefile pytest.ini scripts app tests
+      git status        (confirm no .env, data/, *.db)
+      git commit -m "<message>"   (needs your author name and email; not invented)
+    Do not push unless requested.
+  - .env: exists locally (ignored by .gitignore and .dockerignore). Not read beyond variable names.
+  - data/: excluded by .gitignore and .dockerignore. Contains assessment copies and runtime state.
+  - No ZIP created (not yet: live provider is not configured or verified).
+  - Original database SHA-256 A2D151A58038E98E... matches the original, the working copy and the source.
+
+12.8 Compliance status (summary)
+  PASS: tests (host and container); Docker build, start, health 200; OCR in container; remote-work
+        precedence regression; RBAC, session, filtering, confirmation, rollback and token budget
+        (unchanged, still tested); DESIGN.md 2 pages (approximate render); data preservation.
+  BLOCKED: live provider verification (Gemini key and model ID needed; Groq key and model ID also
+        needed for the Groq path). Until then, TASK 10.3 is implemented but NOT satisfied in practice.
+  NOT VERIFIED: live Gemini and Groq answer quality; OCR on the host; DESIGN page count in Word;
+        30-second limit under a live model; cold-start timing from an empty index.
+  NOT DONE (waiting for input): ZIP creation; Git commit (needs author identity).
+
+
+13. LIVE GEMINI VERIFICATION (this session) - NOT PASSED
+=======================================================
+
+13.1 Configuration (checked by name and length only; no key displayed)
+  - .env: LLM_PROVIDER=gemini, GEMINI_API_KEY set (53 characters), GEMINI_MODEL=gemini-3.8-flash.
+  - Container recreated with docker compose up -d --force-recreate.
+  - docker compose ps: veltrix-app-1 healthy.
+  - GET http://localhost:8000/health -> HTTP 200.
+  - Startup log: service ready documents=30 chunks=159 provider=gemini (NOT mock-extractive).
+
+13.2 Key and model access (verified)
+  - The key can list Gemini models (46 names visible). The configured model name appears in the list.
+    Names only were printed; the key was not printed.
+
+13.3 Live policy request through POST /chat ("How many sick leave days do I get?", employee E2004)
+  - HTTP 200 from the API. The request DID reach Google's generateContent endpoint.
+  - Results across about 30 real Gemini calls made during diagnosis:
+      * 503 Service Unavailable (ServerError) on several calls.
+      * 200 OK but INVALID JSON: the reply was cut off after 70-82 characters, mid-sentence.
+        Example ending: '"answer": "Under the current Global Leave Policy ('
+      * 429 RESOURCE_EXHAUSTED: quota exceeded for generate_content_free_tier_requests,
+        limit 20 requests per day for model gemini-3.8-flash. Google said: retry in about 14 h 28 min.
+  - The application handled every failure safely: route no_answer, no citations, no mock text.
+    It never silently fell back to the mock.
+
+13.4 Root causes
+  - QUOTA (confirmed): the key is on the Gemini FREE tier, limited to 20 requests per day for this
+    model. My diagnostic calls used up that quota. This is caused by my testing, not by the application.
+    Until the quota resets or billing is enabled, no further live requests can succeed.
+  - 503 (not diagnosed): server-side unavailability at Google. Cause not confirmed.
+  - TRUNCATED REPLIES (suspected, NOT confirmed): replies of about 70 characters from a 700-token
+    budget suggest the model's internal reasoning used the output budget. Not confirmed, because the
+    quota blocked the test that would show finish_reason and token counts.
+
+13.5 Smallest safe fixes (proposed; NOT applied; need approval)
+  - If the truncation is confirmed: raise the output budget in app/llm/gemini_provider.py
+    (MAX_OUTPUT_TOKENS, for example to 2048) and, if the model supports it, limit its reasoning budget.
+    Both need checking against the SDK and the model before use.
+  - Quota: enable billing for the key in Google AI Studio, or use a model with quota on the key.
+    Choosing a model is your decision.
+
+13.6 Status
+  - Live Gemini answer: NOT VERIFIED (quota exhausted; retry after about 14 h 28 min, or after billing is enabled).
+  - Provider configuration and wiring: VERIFIED (provider=gemini active; requests reach Google).
+  - Full test suite (no live calls): host 261 passed, 2 skipped (exit 0); container 262 passed, 1 skipped (exit 0).
+  - Original database SHA-256 a2d151a58038e98e... unchanged. Working copy unchanged.
+  - No ZIP created.
+
+13.7 Lesson for the process
+  - I kept sending diagnostic requests after the first 503 responses, which exhausted the free quota.
+    Next time, stop after the first error and check the quota first.
